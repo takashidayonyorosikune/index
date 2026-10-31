@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Melon Sandbox Smartphone Edition</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #1a1a1a;
+            color: #fff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            height: 100vh;
+            overflow: hidden;
+            touch-action: none; /* スマホの画面スクロールを禁止してゲーム操作に集中 */
+        }
+        h3 { margin: 10px 0 5px 0; color: #ff4444; font-size: 1.2rem; }
+        #controls {
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            background-color: #333;
+            color: white;
+            border: 2px solid #555;
+            padding: 10px 15px;
+            cursor: pointer;
+            font-weight: bold;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        button:active { background-color: #666; }
+        canvas {
+            background-color: #2b2b2b;
+            border-top: 4px solid #444;
+            border-bottom: 4px solid #444;
+            width: 100%;
+            height: 65vh; /* スマホの画面に収まる高さ */
+        }
+    </style>
+</head>
+<body>
+
+    <h3>🩸 BLOOD SANDBOX (スマホ対応) 🩸</h3>
+    <div id="controls">
+        <button onclick="spawnRagdoll()">🧍 スポーーン</button>
+        <button onclick="clearCanvas()">🧹 クリア</button>
+    </div>
+    <canvas id="sandbox"></canvas>
+
+    <script>
+        const canvas = document.getElementById('sandbox');
+        const ctx = canvas.getContext('2d');
+
+        // 画面サイズに合わせてキャンバスの解像度を調整
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight * 0.65;
+        }
+        resizeCanvas();
+
+        const GRAVITY = 0.4;
+        const FRICTION = 0.99;
+        const BOUNCE = 0.3;
+
+        let points = [];
+        let sticks = [];
+        let particles = [];
+        let draggedPoint = null;
+
+        class Point {
+            constructor(x, y, radius = 8, isStatic = false, type = 'body') {
+                this.x = x;
+                this.y = y;
+                this.oldx = x;
+                this.oldy = y;
+                this.isStatic = isStatic;
+                this.radius = radius;
+                this.type = type;
+            }
+            update() {
+                if (this.isStatic) return;
+                let vx = (this.x - this.oldx) * FRICTION;
+                let vy = (this.y - this.oldy) * FRICTION;
+                this.oldx = this.x;
+                this.oldy = this.y;
+                this.x += vx;
+                this.y += vy + GRAVITY;
+
+                // 地面と壁の衝突
+                if (this.y > canvas.height - this.radius) {
+                    let speed = Math.abs(this.y - this.oldy);
+                    this.y = canvas.height - this.radius;
+                    this.oldy = this.y + vx * BOUNCE;
+                    if (speed > 6) spawnBlood(this.x, this.y, speed * 2);
+                }
+                if (this.x > canvas.width - this.radius) {
+                    this.x = canvas.width - this.radius;
+                    this.oldx = this.x + vx * BOUNCE;
+                } else if (this.x < this.radius) {
+                    this.x = this.radius;
+                    this.oldx = this.x + vx * BOUNCE;
+                }
+            }
+        }
+
+        class Stick {
+            constructor(p0, p1, length) {
+                this.p0 = p0;
+                this.p1 = p1;
+                this.length = length;
+            }
+            update() {
+                let dx = this.p1.x - this.p0.x;
+                let dy = this.p1.y - this.p0.y;
+                let distance = Math.sqrt(dx * dx + dy * dy);
+                let difference = this.length - distance;
+                let percent = difference / distance / 2;
+                let offsetZ = dx * percent;
+                let offsetY = dy * percent;
+
+                if (!this.p0.isStatic) { this.p0.x -= offsetZ; this.p0.y -= offsetY; }
+                if (!this.p1.isStatic) { this.p1.x += offsetZ; this.p1.y += offsetY; }
+            }
+        }
+
+        class BloodParticle {
+            constructor(x, y, vx, vy) {
+                this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+                this.radius = Math.random() * 4 + 1;
+                this.life = Math.random() * 50 + 30;
+            }
+            update() {
+                this.vx *= 0.98; this.vy += 0.3;
+                this.x += this.vx; this.y += this.vy;
+                this.life--;
+                if (this.y > canvas.height) this.y = canvas.height;
+            }
+            draw() {
+                ctx.fillStyle = `rgba(220, 0, 0, ${this.life / 80})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function spawnBlood(x, y, count) {
+            for (let i = 0; i < count; i++) {
+                let angle = Math.random() * Math.PI * 2;
+                let speed = Math.random() * 7 + 2;
+                particles.push(new BloodParticle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed - 2));
+            }
+        }
+
+        function spawnRagdoll() {
+            let cx = Math.random() * (canvas.width - 100) + 50;
+            let cy = 40;
+
+            let head  = new Point(cx, cy, 18, false, 'head'); // スマホ用に判定を少しデカく
+            let neck  = new Point(cx, cy + 30);
+            let pelvis = new Point(cx, cy + 80);
+            let r_shoulder = new Point(cx - 25, cy + 35);
+            let r_hand     = new Point(cx - 45, cy + 60);
+            let l_shoulder = new Point(cx + 25, cy + 35);
+            let l_hand     = new Point(cx + 45, cy + 60);
+            let r_knee = new Point(cx - 20, cy + 115);
+            let r_foot = new Point(cx - 25, cy + 150);
+            let l_knee = new Point(cx + 20, cy + 115);
+            let l_foot = new Point(cx + 25, cy + 150);
+
+            points.push(head, neck, pelvis, r_shoulder, r_hand, l_shoulder, l_hand, r_knee, r_foot, l_knee, l_foot);
+
+            sticks.push(new Stick(head, neck, 30));
+            sticks.push(new Stick(neck, pelvis, 50));
+            sticks.push(new Stick(neck, r_shoulder, 25));
+            sticks.push(new Stick(r_shoulder, r_hand, 30));
+            sticks.push(new Stick(neck, l_shoulder, 25));
+            sticks.push(new Stick(l_shoulder, l_hand, 30));
+            sticks.push(new Stick(pelvis, r_knee, 40));
+            sticks.push(new Stick(r_knee, r_foot, 40));
+            sticks.push(new Stick(pelvis, l_knee, 40));
+            sticks.push(new Stick(l_knee, l_foot, 40));
+        }
+
+        function clearCanvas() { points = []; sticks = []; particles = []; }
+
+        // マウス＆タッチ共通の位置取得関数
+        function getEventPos(e) {
+            let rect = canvas.getBoundingClientRect();
+            let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        function handleStart(e) {
+            let pos = getEventPos(e);
+            for (let p of points) {
+                let dx = p.x - pos.x;
+                let dy = p.y - pos.y;
+                if (Math.sqrt(dx*dx + dy*dy) < p.radius + 25) { // タッチしやすいように判定をガバガバに
+                    draggedPoint = p;
+                    break;
+                }
+            }
+        }
+
+        function handleMove(e) {
+            if (!draggedPoint) return;
+            let pos = getEventPos(e);
+            draggedPoint.x = pos.x;
+            draggedPoint.y = pos.y;
+            if (Math.random() < 0.4) spawnBlood(draggedPoint.x, draggedPoint.y, 2);
+        }
+
+        function handleEnd() { draggedPoint = null; }
+
+        // マウスイベント
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        canvas.addEventListener('mouseup', handleEnd);
+        // タッチイベント（スマホ対応）
+        canvas.addEventListener('touchstart', handleStart, { passive: true });
+        canvas.addEventListener('touchmove', handleMove, { passive: true });
+        canvas.addEventListener('touchend', handleEnd);
+
+        window.addEventListener('resize', resizeCanvas);
+
+        function loop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let p of points) p.update();
+            for (let i = 0; i < 5; i++) { for (let s of sticks) s.update(); }
+            for (let p of particles) p.update();
+            particles = particles.filter(p => p.life > 0);
+
+            // 骨
+            ctx.strokeStyle = '#558855'; ctx.lineWidth = 8;
+            for (let s of sticks) {
+                ctx.beginPath(); ctx.moveTo(s.p0.x, s.p0.y); ctx.lineTo(s.p1.x, s.p1.y); ctx.stroke();
+            }
+            // 肉体
+            for (let p of points) {
+                ctx.fillStyle = p.type === 'head' ? '#44aa44' : '#66cc66';
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2); ctx.fill();
+                if (p.type === 'head') {
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(p.x - 6, p.y - 4, 3, 5); ctx.fillRect(p.x + 3, p.y - 4, 3, 5);
+                }
+            }
+            // 血
+            for (let p of particles) p.draw();
+            requestAnimationFrame(loop);
+        }
+
+        spawnRagdoll();
+        loop();
+    </script>
+</body>
+</html>
